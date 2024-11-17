@@ -1,39 +1,68 @@
-# Python
-__pycache__/
-*.py[cod]
-*.class
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
 
-# 前端依赖
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# Testing
+coverage/
 
-# 测试和构建
-/coverage
-/.next/
-/out/
-/build
+# Next.js
+.next/
+out/
 
-# 系统文件
+# Production
+build/
+dist/
+
+# Misc
 .DS_Store
 *.pem
+.env*
+!.env.example
 
-# 日志
+# Debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# 环境配置
-.env*
+# Local env files
+.env*.local
 
-# 部署
+# Vercel
 .vercel
 
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Video files
+output_tracking.mp4
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
