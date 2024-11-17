@@ -2,5 +2,38 @@
 __pycache__/
 *.py[cod]
 *.class
-.DS_Store
 
+# 前端依赖
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# 测试和构建
+/coverage
+/.next/
+/out/
+/build
+
+# 系统文件
+.DS_Store
+*.pem
+
+# 日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 环境配置
+.env*
+
+# 部署
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
