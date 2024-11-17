@@ -73,8 +73,8 @@ http://localhost:3000
 
 ## 许可证
 
-MIT License
+MIT License(假的吧，我不知道我有没有啊，这啥意思啊这)
 
-## 贡献
+## 走过路过给个star
 
-能不能给我点个star，我求你了哥/姐
+能不能给我点个star，我求你了哥/姐～
