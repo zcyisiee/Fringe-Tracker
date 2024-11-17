@@ -3,6 +3,8 @@ import numpy as np
 from scipy.signal import savgol_filter, find_peaks
 from collections import deque
 import sys
+from tqdm import tqdm
+import os
 
 class RobustFringeTracker:
     def __init__(self):
@@ -37,6 +39,8 @@ class RobustFringeTracker:
         self.max_failures = 30  # 最大允许连续失配次数
 
         self.video_writer = None
+
+        self.input_video_path = None
     
     def reset_tracking_state(self, profile_smooth, profile_peaks, x, y):
         """重置追踪状态"""
@@ -72,6 +76,7 @@ class RobustFringeTracker:
 
     def load_video(self, video_path):
         """加载视频"""
+        self.input_video_path = video_path  # 保存输入视频路径
         self.cap = cv2.VideoCapture(video_path)
         if not self.cap.isOpened():
             raise ValueError("Cannot load video")
@@ -85,14 +90,29 @@ class RobustFringeTracker:
         self.first_frame = self.preprocess_frame(self.first_frame)
     
     def mouse_callback(self, event, x, y, flags, param):
-        """鼠标回调函数"""
+        """处理鼠标事件并提供实时视觉反馈"""
         if event == cv2.EVENT_LBUTTONDOWN:
             if len(self.points) < 2:
                 self.points.append((x, y))
-                cv2.circle(self.display_image, (x, y), 3, (0, 0, 255), -1)
-                if len(self.points) == 2:
-                    cv2.line(self.display_image, self.points[0], self.points[1], (0, 255, 0), 1)
-                cv2.imshow('Fringe Tracking', self.display_image)
+                
+        # 每次创建新的显示图像
+        self.display_image = self.first_frame.copy()
+        if len(self.display_image.shape) == 2:
+            self.display_image = cv2.cvtColor(self.display_image, cv2.COLOR_GRAY2BGR)
+            
+        # 显示点击的点
+        for point in self.points:
+            cv2.circle(self.display_image, point, 3, (0, 0, 255), -1)
+        
+        # 如果有第一个点，显示当前线段
+        if len(self.points) == 1:
+            cv2.line(self.display_image, self.points[0], (x, y), (0, 255, 0), 2)
+        elif len(self.points) == 2:
+            cv2.line(self.display_image, self.points[0], self.points[1], (0, 255, 0), 2)
+        
+        # 更新显示
+        cv2.imshow('Fringe Tracking', self.display_image)
+
 
     def preprocess_frame(self, frame):
         """预处理图像帧"""
@@ -104,6 +124,61 @@ class RobustFringeTracker:
         frame = cv2.GaussianBlur(frame, (3, 3), 0)
         return frame
     
+    def process_video(self):
+        """处理视频并返回处理结果"""
+        # 获取视频总帧数用于进度条
+        total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # 存储每一帧的处理结果
+        processed_frames = []
+        
+        # 使用tqdm创建进度条
+        with tqdm(total=total_frames, desc="Processing video", 
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]") as pbar:
+                
+            while True:
+                ret, frame = self.cap.read()
+                if not ret:
+                    break
+                    
+                # 处理帧
+                processed_frame = self.preprocess_frame(frame)
+                profile_smooth, profile_peaks, x, y = self.get_line_profile(processed_frame)
+                
+                if profile_smooth is not None:
+                    self.update_tracking(profile_smooth, profile_peaks, x, y)
+                
+                # 绘制追踪信息
+                frame_with_overlay = self.draw_overlay(frame)
+                processed_frames.append(frame_with_overlay)
+                
+                # 更新进度条
+                pbar.update(1)
+        
+        return processed_frames
+    
+    def generate_output_video(self, processed_frames, output_path):
+        """根据处理好的帧生成输出视频"""
+        if not processed_frames:
+            print("No frames to write!")
+            return
+            
+        # 获取视频参数
+        fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+        height, width = processed_frames[0].shape[:2]
+        
+        # 创建VideoWriter
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        
+        # 写入视频帧
+        print("\nGenerating output video...")
+        for frame in tqdm(processed_frames, desc="Writing video"):
+            out.write(frame)
+        
+        out.release()
+        print(f"\nOutput video saved as: {output_path}")
+
     def get_line_profile(self, image):
         """获取基准线上的强度分布"""
         if len(self.points) != 2:
@@ -173,6 +248,77 @@ class RobustFringeTracker:
             return True
             
         return False
+    def get_output_video_name(self, input_video_path):
+        """根据输入视频路径生成输出视频路径"""
+        # 分离文件名和扩展名
+        basename = os.path.basename(input_video_path)
+        filename, _ = os.path.splitext(basename)  # 忽略原始扩展名
+        # 生成新文件名，强制使用.mp4扩展名
+        output_filename = f"{filename}_技术版.mp4"
+        # 返回与输入视频相同目录下的新文件路径
+        return os.path.join(os.path.dirname(input_video_path), output_filename)
+
+    
+    def process_and_save_video(self, output_path):
+        """处理视频并直接写入输出文件,避免存储所有帧"""
+        # 获取视频参数
+        total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+        width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # 使用H.264编码器
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        
+        if not out.isOpened():
+            print("Failed to create output video file. Trying alternative codec...")
+            # 如果H.264编码器不可用，尝试使用平台默认编码器
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            if not out.isOpened():
+                raise ValueError("Failed to create output video file")
+        
+        try:
+            # 使用tqdm创建进度条
+            with tqdm(total=total_frames, desc="Processing video", 
+                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]") as pbar:
+                
+                while True:
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        break
+                    
+                    # 处理帧
+                    processed_frame = self.preprocess_frame(frame)
+                    profile_smooth, profile_peaks, x, y = self.get_line_profile(processed_frame)
+                    
+                    if profile_smooth is not None:
+                        self.update_tracking(profile_smooth, profile_peaks, x, y)
+                    
+                    # 绘制追踪信息
+                    frame_with_overlay = self.draw_overlay(frame)
+                    
+                    # 写入处理后的帧
+                    out.write(frame_with_overlay)
+                    
+                    # 更新进度条
+                    pbar.update(1)
+                    
+                    # 主动释放不需要的内存
+                    del processed_frame
+                    del profile_smooth
+                    del profile_peaks
+                    
+        except Exception as e:
+            print(f"\nError during processing: {str(e)}")
+            raise
+        finally:
+            # 确保资源被释放
+            out.release()
+            
+        print(f"\nOutput video saved as: {output_path}")
+        
     def validate_peaks(self, peaks, heights, distances):
         """验证峰值的有效性"""
         if peaks is None or len(peaks) < self.min_peaks:
@@ -330,94 +476,130 @@ class RobustFringeTracker:
     
     def run(self):
         """运行程序"""
-        if not hasattr(self, 'cap'):
-            return
-            
-        cv2.namedWindow('Fringe Tracking')
-        cv2.setMouseCallback('Fringe Tracking', self.mouse_callback)
-        
-        # 等待用户选择基准线
-        print("Click two points to select the reference line")
-        first_frame = self.preprocess_frame(self.first_frame)
-        self.display_image = cv2.cvtColor(first_frame, cv2.COLOR_GRAY2BGR)
-        
-        while len(self.points) < 2:
-            cv2.imshow('Fringe Tracking', self.display_image)
-            if cv2.waitKey(1) == ord('q'):
+        try:
+            if not hasattr(self, 'cap'):
                 return
-        
-        # 初始化追踪
-        profile_smooth, profile_peaks, x, y = self.get_line_profile(first_frame)
-        if not self.initialize_tracking(profile_smooth, profile_peaks, x, y):
-            print("Failed to initialize tracking")
-            return
+                    
+            cv2.namedWindow('Fringe Tracking')
+            cv2.setMouseCallback('Fringe Tracking', self.mouse_callback)
             
-        # 在这里添加VideoWriter初始化代码 ←
-        fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-        width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.video_writer = cv2.VideoWriter('output_tracking.mp4', fourcc, fps, (width, height))
-        
-        print("Processing video... Press 'q' to quit")
-        while True:
-            ret, frame = self.cap.read()
-            if not ret:
-                break
-                
-            # 预处理帧
-            processed_frame = self.preprocess_frame(frame)
+            # 等待用户选择基准线
+            print("Click two points to select the reference line")
+            first_frame = self.preprocess_frame(self.first_frame)
+            self.display_image = cv2.cvtColor(first_frame, cv2.COLOR_GRAY2BGR)
             
-            # 获取强度分布并追踪峰值
-            profile_smooth, profile_peaks, x, y = self.get_line_profile(processed_frame)
-            if profile_smooth is not None:
-                self.update_tracking(profile_smooth, profile_peaks, x, y)
+            while len(self.points) < 2:
+                cv2.imshow('Fringe Tracking', self.display_image)
+                if cv2.waitKey(1) == ord('q'):
+                    return
             
-            # 绘制追踪信息
-            frame_with_overlay = self.draw_overlay(frame)
-            
-            # 在这里添加写入视频的代码 ←
-            if self.video_writer is not None:
-                self.video_writer.write(frame_with_overlay)
-
-            cv2.imshow('Fringe Tracking', frame_with_overlay)
-            
-            if cv2.waitKey(1) == ord('q'):
-                break
-        
-        # 清理所有资源
-        if self.video_writer is not None:
-            self.video_writer.release()
-            
-        self.cap.release()
-
-        # 输出最终条纹计数
-        print(f"Final count: {self.total_fringes} fringes")
-
-        # 强制关闭所有窗口,重复多次确保成功
-        for _ in range(4):
+            # 关闭选择窗口
             cv2.destroyAllWindows()
-            cv2.waitKey(1)
-
-        # 确保程序完全终止
-        sys.exit(0)
+            cv2.waitKey(1)  # 确保窗口正确关闭
+            
+            # 初始化追踪
+            profile_smooth, profile_peaks, x, y = self.get_line_profile(first_frame)
+            if not self.initialize_tracking(profile_smooth, profile_peaks, x, y):
+                print("Failed to initialize tracking")
+                return
+                
+            # 处理并保存视频
+            output_path = self.get_output_video_name(self.input_video_path)  # 使用保存的路径
+            self.process_and_save_video(output_path)
+            
+            # 输出最终条纹计数
+            print(f"\nFinal fringe count: {self.total_fringes}")
+            
+        except Exception as e:
+            print(f"\nError occurred: {str(e)}")
+            raise
+        finally:
+            # 确保资源被释放
+            if hasattr(self, 'cap'):
+                self.cap.release()
+            
+            # 确保所有窗口都被关闭
+            for _ in range(4):
+                cv2.destroyAllWindows()
+                cv2.waitKey(1)
 
     def draw_overlay(self, frame):
-        """在视频帧上绘制追踪信息"""
-        if len(self.points) == 2:
-            cv2.line(frame, self.points[0], self.points[1], (0, 255, 0), 1)
-            
-        if self.tracked_point is not None:
-            cv2.circle(frame, self.tracked_point, 5, (0, 0, 255), -1)  # 中心点
-            cv2.circle(frame, self.tracked_point, 8, (255, 0, 0), 2)   # 外圈
-            
-        # 显示条纹计数和状态
-        text = f"Fringes: {self.total_fringes}"
-        cv2.putText(frame, text, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        """在视频帧上叠加信息显示，增强视觉效果"""
+        height, width = frame.shape[:2]
         
+        # 计算字体大小（基于帧宽度）
+        font_scale = width / 1000.0  # 基准：1000像素宽时字体大小为1
+        line_thickness = max(1, int(width/500))  # 线条粗细
+        
+        # 首先绘制参考线
+        if len(self.points) == 2:
+            # 确保完整绘制参考线
+            cv2.line(frame, self.points[0], self.points[1], 
+                    (0, 255, 0), line_thickness)
+            
+        # 绘制跟踪点
+        if self.tracked_point is not None:
+            # 计算跟踪点标记的大小
+            circle_radius = max(3, int(width/200))
+            
+            # 绘制跟踪点及其外圈
+            cv2.circle(frame, self.tracked_point, circle_radius, (0, 0, 255), -1)
+            cv2.circle(frame, self.tracked_point, circle_radius + 3, 
+                    (255, 0, 0), line_thickness)
+        
+        # 绘制条纹计数文本
+        text = f"Fringes: {self.total_fringes}"
+        text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)[0]
+        
+        # 计算字体大小 - 增大字体
+        font_scale = width / 600.0  # 调整基准值使字体更大
+        
+        # 计算文本位置 - 左上角
+        margin = int(width * 0.03)  # 边距为宽度的3%
+        text_x = margin
+        text_y = int(height * 0.15)  # 距顶部15%位置，给更大空间
+        
+        # 计算文本背景框的尺寸和位置
+        padding = int(width * 0.02)  # 内边距
+        bg_x1 = text_x - padding
+        bg_y1 = text_y - text_size[1] - padding
+        bg_x2 = text_x + text_size[0] + padding
+        bg_y2 = text_y + padding
+        
+        # 绘制半透明背景
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (bg_x1, bg_y1), (bg_x2, bg_y2), 
+                    (0, 0, 0), -1)
+        
+        # 添加圆角效果
+        corner_radius = int(padding * 0.8)
+        cv2.circle(overlay, (bg_x1 + corner_radius, bg_y1 + corner_radius), 
+                corner_radius, (0, 0, 0), -1)
+        cv2.circle(overlay, (bg_x2 - corner_radius, bg_y1 + corner_radius), 
+                corner_radius, (0, 0, 0), -1)
+        cv2.circle(overlay, (bg_x1 + corner_radius, bg_y2 - corner_radius), 
+                corner_radius, (0, 0, 0), -1)
+        cv2.circle(overlay, (bg_x2 - corner_radius, bg_y2 - corner_radius), 
+                corner_radius, (0, 0, 0), -1)
+        
+        # 应用透明度
+        alpha = 0.7
+        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        
+        # 绘制文本边框
+        border_color = (0, 200, 0)  # 深绿色边框
+        cv2.putText(frame, text, (text_x, text_y), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, 
+                    (0, 0, 0), line_thickness + 2)  # 外边框
+        
+        # 绘制文本
+        cv2.putText(frame, text, (text_x, text_y), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, 
+                    (0, 255, 0), line_thickness)  # 内部文字
+                    
         return frame
-# 使用示例
+    # 使用示例
 if __name__ == "__main__":
     tracker = RobustFringeTracker()
-    tracker.load_video("升温.mov")  # 替换为你的视频文件路径
+    tracker.load_video("示例视频.mov")  # 替换为你的视频文件路径
     tracker.run()
