@@ -123,61 +123,6 @@ class RobustFringeTracker:
         # 轻微的高斯滤波去噪
         frame = cv2.GaussianBlur(frame, (3, 3), 0)
         return frame
-    
-    def process_video(self):
-        """处理视频并返回处理结果"""
-        # 获取视频总帧数用于进度条
-        total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
-        # 存储每一帧的处理结果
-        processed_frames = []
-        
-        # 使用tqdm创建进度条
-        with tqdm(total=total_frames, desc="Processing video", 
-                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]") as pbar:
-                
-            while True:
-                ret, frame = self.cap.read()
-                if not ret:
-                    break
-                    
-                # 处理帧
-                processed_frame = self.preprocess_frame(frame)
-                profile_smooth, profile_peaks, x, y = self.get_line_profile(processed_frame)
-                
-                if profile_smooth is not None:
-                    self.update_tracking(profile_smooth, profile_peaks, x, y)
-                
-                # 绘制追踪信息
-                frame_with_overlay = self.draw_overlay(frame)
-                processed_frames.append(frame_with_overlay)
-                
-                # 更新进度条
-                pbar.update(1)
-        
-        return processed_frames
-    
-    def generate_output_video(self, processed_frames, output_path):
-        """根据处理好的帧生成输出视频"""
-        if not processed_frames:
-            print("No frames to write!")
-            return
-            
-        # 获取视频参数
-        fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-        height, width = processed_frames[0].shape[:2]
-        
-        # 创建VideoWriter
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        
-        # 写入视频帧
-        print("\nGenerating output video...")
-        for frame in tqdm(processed_frames, desc="Writing video"):
-            out.write(frame)
-        
-        out.release()
-        print(f"\nOutput video saved as: {output_path}")
 
     def get_line_profile(self, image):
         """获取基准线上的强度分布"""
